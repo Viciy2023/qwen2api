@@ -36,19 +36,21 @@ async def gemini_stream(model: str, request: Request):
     body = await request.json()
     resolved_model = resolve_model(model)
     contents = body.get("contents", [])
-    
+
     content = ""
     for m in contents:
         if m.get("role") == "user":
             for part in m.get("parts", []):
                 content += part.get("text", "") + "\n"
-                
+
+    log.info(f"[Gemini] model={resolved_model}, stream=True, prompt_len={len(content)}")
+
     try:
         events, chat_id, acc = await client.chat_stream_events_with_retry(resolved_model, content)
     except Exception as e:
         log.error(f"Gemini proxy failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
+
     async def generate():
         full_text = ""
         try:
@@ -62,6 +64,8 @@ async def gemini_stream(model: str, request: Request):
                         ]
                     }
                     yield f"data: {json.dumps(chunk)}\n\n"
+
+            log.info(f"[Gemini] Request complete. Generated {len(full_text)} characters.")
                     
             usage = calculate_usage(content, full_text)
             

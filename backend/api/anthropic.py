@@ -58,6 +58,8 @@ async def anthropic_messages(request: Request):
         
     content = build_prompt_with_tools(oai_msgs, tools)
             
+    log.info(f"[Anthropic] model={model}, stream=True, tools={[t.get('name') for t in tools]}, prompt_len={len(content)}")
+
     try:
         events, chat_id, acc = await client.chat_stream_events_with_retry(model, content)
     except Exception as e:
@@ -84,6 +86,8 @@ async def anthropic_messages(request: Request):
                         "delta": {"type": "text_delta", "text": text}
                     }
                     yield f"event: content_block_delta\ndata: {json.dumps(chunk)}\n\n"
+            
+            log.info(f"[Anthropic] Request complete. Generated {len(full_text)} characters.")
                     
             usage = calculate_usage(content, full_text)
             stop_event = {"type": "message_stop", "amazon-bedrock-invocationMetrics": usage}

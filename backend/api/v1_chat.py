@@ -47,14 +47,16 @@ async def chat_completions(request: Request):
     
     # 构建带指令劫持的 Prompt
     content = build_prompt_with_tools(messages, tools)
-            
+    
+    log.info(f"[OAI] model={model}, stream=True, tools={[t.get('function', {}).get('name') for t in tools]}, prompt_len={len(content)}")
+
     # 无感重试调用
     try:
         events, chat_id, acc = await client.chat_stream_events_with_retry(model, content)
     except Exception as e:
         log.error(f"Chat request failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-        
+
     async def generate():
         full_text = ""
         sieve = ToolSieve()
@@ -64,7 +66,7 @@ async def chat_completions(request: Request):
                     text = evt.get("content", "")
                     safe_text, tool_calls = sieve.process_delta(text)
                     full_text += safe_text
-                    
+
                     if safe_text:
                         chunk = {
                             "id": "chatcmpl-123",
@@ -73,8 +75,9 @@ async def chat_completions(request: Request):
                             "choices": [{"index": 0, "delta": {"content": safe_text}, "finish_reason": None}]
                         }
                         yield f"data: {json.dumps(chunk)}\n\n"
-                    
+
                     for tc in tool_calls:
+                        log.info(f"[OAI] Tool Call Emitted: {tc.get('name')} with args: {tc.get('input')}")
                         # 转换 tool call 格式为 OpenAI 兼容
                         tc_chunk = {
                             "id": "chatcmpl-123",
@@ -92,6 +95,9 @@ async def chat_completions(request: Request):
                             }, "finish_reason": "tool_calls"}]
                         }
                         yield f"data: {json.dumps(tc_chunk)}\n\n"
+
+            # 打印最终输出长度便于调试
+            log.info(f"[OAI] Request complete. Generated {len(full_text)} characters.")
                     
             # 扣费统计
             usage = calculate_usage(content, full_text)
