@@ -28,7 +28,7 @@ def check_and_install_dependencies():
         subprocess.check_call(
             [python_exec, "-m", "pip", "install", "-r", "requirements.txt", "--quiet"],
             cwd=BACKEND_DIR,
-            stdout=subprocess.DEVNULL,
+            stdout=None, # 将 pip 安装日志直接输出，暴露错误
             stderr=subprocess.STDOUT
         )
     except Exception as e:
@@ -57,7 +57,7 @@ def check_and_install_dependencies():
             npm_cmd,
             cwd=FRONTEND_DIR,
             shell=is_windows,
-            stdout=subprocess.DEVNULL, # 如果你想看npm安装过程可以改为 None，但通常比较吵
+            stdout=None, # 将 npm install 的日志也直接输出到终端，让你能看到为什么 npm 失败
             stderr=subprocess.STDOUT
         )
         print("✓ [预检通过] 前端依赖已就绪。")
