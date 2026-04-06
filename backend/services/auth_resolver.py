@@ -16,7 +16,7 @@ from camoufox.async_api import AsyncCamoufox
 
 log = logging.getLogger(__name__)
 
-BASE_URL = "https://chat.qwenlm.ai"
+BASE_URL = "https://chat.qwen.ai"
 
 def _new_browser():
     return AsyncCamoufox(
