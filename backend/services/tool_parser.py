@@ -76,8 +76,9 @@ def parse_tool_calls(answer: str, tools: list):
     # 1. Primary: ##TOOL_CALL##...##END_CALL##
     tc_m = re.search(r'##TOOL_CALL##\s*(.*?)\s*##END_CALL##', answer, re.DOTALL | re.IGNORECASE)
     if tc_m:
+        raw_json = tc_m.group(1).strip()
         try:
-            obj = json.loads(tc_m.group(1))
+            obj = json.loads(raw_json)
             name = obj.get("name", "")
             inp = obj.get("input", obj.get("args", obj.get("arguments", obj.get("parameters", {}))))
             if isinstance(inp, str):
@@ -87,7 +88,13 @@ def parse_tool_calls(answer: str, tools: list):
             log.info(f"[ToolParse] ✓ ##TOOL_CALL## 格式: name={name!r}, input={str(inp)[:120]}")
             return _make_tool_block(name, inp, prefix)
         except (json.JSONDecodeError, ValueError) as e:
-            log.warning(f"[ToolParse] ##TOOL_CALL## 格式解析失败: {e}, content={tc_m.group(1)[:100]!r}")
+            log.warning(f"[ToolParse] ##TOOL_CALL## 格式解析失败: {e}, 尝试提取 name 强制触发工具纠错机制")
+            name_m = re.search(r'"name"\s*:\s*"([^"]+)"', raw_json)
+            name = name_m.group(1) if name_m else next(iter(tool_names)) if tool_names else "unknown"
+            prefix = answer[:tc_m.start()].strip()
+            # 返回一个含有故意报错信息的 input，迫使 Claude Code 拒绝并提醒 LLM 修复 JSON
+            fake_input = {"_json_error": f"You generated invalid JSON (unescaped quotes or literal newlines). Error: {e}"}
+            return _make_tool_block(name, fake_input, prefix)
 
     # 2. XML: <tool_call>...</tool_call>
     xml_m = re.search(r'<tool_call>\s*(.*?)\s*</tool_call>', answer, re.DOTALL | re.IGNORECASE)
