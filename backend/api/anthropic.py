@@ -502,30 +502,29 @@ async def anthropic_messages(request: Request):
                                 log.warning(f"[ToolLoop-ANT] 工具 {n} 连续调用≥2次，强制切换工具 (attempt {stream_attempt+1}/{max_attempts})")
                                 await asyncio.sleep(0.15)
                                 continue
-                            # 工具调用合法，退出重试循环
-                            break
-                        if acc:
-                            client.account_pool.release(acc)
-                            if chat_id:
-
-                                asyncio.create_task(client.delete_chat(acc.token, chat_id))
-                        current_prompt = current_prompt.rstrip()
-                        if current_prompt.endswith("Assistant:"):
-                            current_prompt = (
-                                current_prompt[:-len("Assistant:")]
-                                + "[MANDATORY NEXT STEP]: You MUST output exactly one ##TOOL_CALL## block now. "
-                                  "Choose the best tool from the provided list by yourself. "
-                                  "Do not answer in plain text.\nAssistant:"
-                            )
+                            # 工具调用合法，继续构建响应（不 continue，不 break）
                         else:
-                            current_prompt += (
-                                "\n\n[MANDATORY NEXT STEP]: You MUST output exactly one ##TOOL_CALL## block now. "
-                                "Choose the best tool from the provided list by yourself. "
-                                "Do not answer in plain text.\nAssistant:"
-                            )
-                        log.warning(f"[ToolParse-ANT] 模型返回空响应或无工具调用，重试 (attempt {stream_attempt+1}/{max_attempts})")
-                        await asyncio.sleep(0.15)
-                        continue
+                            if acc:
+                                client.account_pool.release(acc)
+                                if chat_id:
+                                    asyncio.create_task(client.delete_chat(acc.token, chat_id))
+                            current_prompt = current_prompt.rstrip()
+                            if current_prompt.endswith("Assistant:"):
+                                current_prompt = (
+                                    current_prompt[:-len("Assistant:")]
+                                    + "[MANDATORY NEXT STEP]: You MUST output exactly one ##TOOL_CALL## block now. "
+                                      "Choose the best tool from the provided list by yourself. "
+                                      "Do not answer in plain text.\nAssistant:"
+                                )
+                            else:
+                                current_prompt += (
+                                    "\n\n[MANDATORY NEXT STEP]: You MUST output exactly one ##TOOL_CALL## block now. "
+                                    "Choose the best tool from the provided list by yourself. "
+                                    "Do not answer in plain text.\nAssistant:"
+                                )
+                            log.warning(f"[ToolParse-ANT] 模型返回空响应或无工具调用，重试 (attempt {stream_attempt+1}/{max_attempts})")
+                            await asyncio.sleep(0.15)
+                            continue
                 else:
                     blocks = [{"type": "text", "text": answer_text}]
                     stop_reason = "end_turn"
