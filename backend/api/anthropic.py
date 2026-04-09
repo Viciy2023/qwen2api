@@ -502,6 +502,8 @@ async def anthropic_messages(request: Request):
                                 log.warning(f"[ToolLoop-ANT] 工具 {n} 连续调用≥2次，强制切换工具 (attempt {stream_attempt+1}/{max_attempts})")
                                 await asyncio.sleep(0.15)
                                 continue
+                            # 工具调用合法，退出重试循环
+                            break
                         if acc:
                             client.account_pool.release(acc)
                             if chat_id:
