@@ -256,7 +256,7 @@ def build_prompt_with_tools(system_prompt: str, messages: list, tools: list, *, 
     NEEDSREVIEW_MARKERS = ("需求回显", "已了解规则", "等待用户输入", "待执行任务", "待确认事项",
                            "[需求回显]", "**需求回显**")
     msg_count = 0
-    max_history_msgs = 8 if tools else 200
+    max_history_msgs = (6 if client_profile == CLAUDE_CODE_OPENAI_PROFILE else 8) if tools else 200
     for msg in reversed(messages):
         if msg_count >= max_history_msgs:
             break
@@ -276,8 +276,9 @@ def build_prompt_with_tools(system_prompt: str, messages: list, tools: list, *, 
                 )
             elif not isinstance(tool_content, str):
                 tool_content = str(tool_content)
-            if len(tool_content) > 300:
-                tool_content = tool_content[:300] + "...[truncated]"
+            tool_result_limit = 180 if client_profile == CLAUDE_CODE_OPENAI_PROFILE else 300
+            if len(tool_content) > tool_result_limit:
+                tool_content = tool_content[:tool_result_limit] + "...[truncated]"
             line = f"[Tool Result]{(' id=' + tool_call_id) if tool_call_id else ''}\n{tool_content}\n[/Tool Result]"
             if used + len(line) + 2 > budget and history_parts:
                 break
@@ -312,7 +313,15 @@ def build_prompt_with_tools(system_prompt: str, messages: list, tools: list, *, 
             continue
         is_tool_result = role == "user" and ("[Tool Result]" in text or "[tool result]" in text.lower()
                                               or text.startswith("{") or "\"results\"" in text[:100])
-        max_len = 600 if is_tool_result else 1400
+        if client_profile == CLAUDE_CODE_OPENAI_PROFILE and tools:
+            if is_tool_result:
+                max_len = 220
+            elif role == "assistant":
+                max_len = 500
+            else:
+                max_len = 900
+        else:
+            max_len = 600 if is_tool_result else 1400
         if len(text) > max_len:
             text = text[:max_len] + "...[truncated]"
         is_tool_result_only_user_msg = role == "user" and not user_text_only.strip() and bool(text.strip())
@@ -324,7 +333,7 @@ def build_prompt_with_tools(system_prompt: str, messages: list, tools: list, *, 
         used += len(line) + 2
         msg_count += 1
 
-    if tools and messages:
+    if tools and messages and client_profile != CLAUDE_CODE_OPENAI_PROFILE:
         first_user = next(
             (
                 m for m in messages
