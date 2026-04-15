@@ -1,6 +1,6 @@
 ---
 title: Qwen2Api
-emoji: rocket
+emoji: 🚀
 colorFrom: indigo
 colorTo: blue
 sdk: docker
