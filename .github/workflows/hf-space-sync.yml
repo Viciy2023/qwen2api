@@ -1,0 +1,45 @@
+name: Sync Hugging Face Space
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  sync-space:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Hugging Face settings
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO }}
+        run: |
+          test -n "$HF_TOKEN" || (echo "Missing GitHub secret HF_TOKEN" && exit 1)
+          test -n "$HF_SPACE_REPO" || (echo "Missing GitHub variable HF_SPACE_REPO" && exit 1)
+
+      - name: Publish huggingface directory to Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          SPACE_DIR="$(mktemp -d)"
+          git clone "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}" "$SPACE_DIR"
+          find "$SPACE_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a huggingface/. "$SPACE_DIR/"
+          printf 'source_sha=%s\n' "$GITHUB_SHA" > "$SPACE_DIR/.hf-sync"
+          cd "$SPACE_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          if git diff --cached --quiet; then
+            echo "No Hugging Face changes to push"
+            exit 0
+          fi
+          git commit -m "chore: sync Hugging Face Space"
+          git push origin HEAD:main

@@ -40,3 +40,4 @@ fix_*.py
 *.njsproj
 *.sln
 *.sw?
+huggingface/.env.space.example
