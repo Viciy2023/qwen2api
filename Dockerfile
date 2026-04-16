@@ -1,79 +1,73 @@
-# Stage 1: Build Frontend
-FROM node:20-slim AS frontend-builder
+# syntax=docker/dockerfile:1.7
+
+# Stage 1: Build frontend assets once on the build platform.
+FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS frontend-builder
 WORKDIR /app
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Stage 2: Backend + Final Image
-FROM python:3.12-slim
+# Stage 2: Runtime image.
+FROM python:3.12-slim-bookworm
 WORKDIR /workspace
 
-# Always refresh apt cache first (never cache this layer)
-RUN apt-get update
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONIOENCODING=utf-8 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=7860 \
+    WORKERS=1 \
+    LOG_LEVEL=INFO \
+    PYTHONPATH=/workspace
 
-# Install system dependencies for headless Firefox (Camoufox)
-# Use || true on packages that may differ across Debian versions
-RUN apt-get install -y --no-install-recommends \
-    wget \
-    curl \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    libx11-6 \
-    libxcb1 \
-    libxrandr2 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxext6 \
-    libxkbcommon0 \
+    curl \
+    wget \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
     libdbus-1-3 \
-    libgtk-3-0 \
+    libdbus-glib-1-2 \
     libdrm2 \
     libgbm1 \
-    libxshmfence1 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libpangocairo-1.0-0 \
-    libcups2 \
-    libnss3 \
-    libnspr4 \
     libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpangocairo-1.0-0 \
+    libpulse0 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    libxshmfence1 \
     fonts-liberation \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk || true \
-    && apt-get install -y --no-install-recommends libdbus-glib-1-2 || true \
-    && apt-get install -y --no-install-recommends libasound2 libasound2t64 || true \
-    && apt-get install -y --no-install-recommends libpulse0 || true \
-    && apt-get install -y --no-install-recommends libx11-xcb1 || true \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONIOENCODING=utf-8
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
 
-COPY backend/requirements.txt ./backend/
-RUN pip install --no-cache-dir -r backend/requirements.txt
-
-# Download Camoufox browser at build time
+# Download Camoufox browser at build time so runtime hosts do not need to fetch it again.
 RUN python -m camoufox fetch
 
 COPY backend/ ./backend/
 COPY start.py ./
 COPY --from=frontend-builder /app/dist ./frontend/dist
-
-# Create data and logs directories
-RUN mkdir -p /workspace/data /workspace/logs
+RUN mkdir -p /workspace/data /workspace/logs /workspace/frontend
 
 EXPOSE 7860
 
-ENV PORT=7860
-ENV FRONTEND_DIST_DIR=/workspace/frontend/dist
-ENV ACCOUNTS_FILE=/workspace/data/accounts.json
-ENV USERS_FILE=/workspace/data/users.json
-ENV CAPTURES_FILE=/workspace/data/captures.json
-ENV PYTHONPATH=/workspace
-
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/healthz || exit 1
+    CMD curl -fsS "http://127.0.0.1:${PORT:-7860}/healthz" || exit 1
 
-CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
+CMD ["sh", "-c", "python -m uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-7860} --workers ${WORKERS:-1}"]

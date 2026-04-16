@@ -129,6 +129,42 @@ class AccountPool:
     def set_max_inflight(self, value: int):
         self.max_inflight = max(1, int(value))
 
+    def get_by_email(self, email: str) -> Optional[Account]:
+        return next((a for a in self.accounts if a.email == email), None)
+
+    async def acquire_preferred(self, preferred_email: str | None = None, exclude: set = None) -> Optional[Account]:
+        if not preferred_email:
+            return await self.acquire(exclude)
+        async with self._lock:
+            now = time.time()
+            preferred = next((a for a in self.accounts if a.email == preferred_email), None)
+            if preferred and preferred.is_available() and preferred.inflight < self.max_inflight and preferred.next_available_at() <= now and (not exclude or preferred.email not in exclude):
+                preferred.inflight += 1
+                preferred.last_used = now
+                preferred.last_request_started = now + _jitter_seconds()
+                self._sticky_email = preferred.email
+                return preferred
+        return await self.acquire(exclude)
+
+    async def acquire_wait_preferred(self, preferred_email: str | None = None, timeout: float = 60, exclude: set = None) -> Optional[Account]:
+        deadline = time.time() + timeout
+        while True:
+            acc = await self.acquire_preferred(preferred_email, exclude)
+            if acc:
+                return acc
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return None
+            evt = asyncio.Event()
+            self._waiters.append(evt)
+            try:
+                await asyncio.wait_for(evt.wait(), timeout=min(remaining, 0.5))
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                if evt in self._waiters:
+                    self._waiters.remove(evt)
+
     async def acquire(self, exclude: set = None) -> Optional[Account]:
         async with self._lock:
             now = time.time()
@@ -224,6 +260,7 @@ class AccountPool:
         activation_pending = [a for a in self.accounts if a.get_status_code() == "pending_activation"]
         banned = [a for a in self.accounts if a.get_status_code() == "banned"]
         in_use = sum(a.inflight for a in self.accounts)
+        account_min_interval_ms = getattr(settings, "ACCOUNT_MIN_INTERVAL_MS", 0)
         return {
             "total": len(self.accounts),
             "valid": len(available),
@@ -234,5 +271,5 @@ class AccountPool:
             "in_use": in_use,
             "max_inflight": self.max_inflight,
             "waiting": len(self._waiters),
-            "account_min_interval_ms": settings.ACCOUNT_MIN_INTERVAL_MS,
+            "account_min_interval_ms": account_min_interval_ms,
         }

@@ -1,94 +1,172 @@
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import asyncio
 import json
 import logging
-import asyncio
-from backend.services.qwen_client import QwenClient
-from backend.services.token_calc import calculate_usage
+from typing import Any
+
+from backend.adapter.standard_request import StandardRequest
 from backend.core.config import resolve_model
+from backend.core.request_logging import new_request_id, request_context, update_request_context
+from backend.runtime import stream_presenter
+from backend.runtime.execution import collect_completion_run, cleanup_runtime_resources
+from backend.services.auth_quota import resolve_auth_context
+from backend.services.token_calc import calculate_usage
 
 log = logging.getLogger("qwen2api.gemini")
 router = APIRouter()
 
-@router.post("/v1beta/models/{model}:generateContent")
-@router.post("/v1/models/{model}:generateContent")
-@router.post("/v1beta/models/{model}:streamGenerateContent")
-@router.post("/v1/models/{model}:streamGenerateContent")
-@router.post("/models/{model}:generateContent")
-@router.post("/models/{model}:streamGenerateContent")
-async def gemini_stream(model: str, request: Request):
-    """
-    Gemini API 协议转换层 -> 转入 OpenAI/Qwen 统一处理内核
-    """
+GEMINI_STREAM_MEDIA_TYPE = "application/json"
+
+
+def _extract_gemini_prompt(body: dict) -> str:
+    lines: list[str] = []
+    for message in body.get("contents", []) or []:
+        if message.get("role") != "user":
+            continue
+        for part in message.get("parts", []) or []:
+            text = part.get("text")
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
+def _is_gemini_stream_request(body: dict[str, Any]) -> bool:
+    if body.get("stream") is True:
+        return True
+    generation_config = body.get("generationConfig")
+    if isinstance(generation_config, dict) and generation_config.get("stream") is True:
+        return True
+    return False
+
+
+def _build_standard_request(model: str, body: dict, *, stream: bool | None = None) -> StandardRequest:
+    prompt = _extract_gemini_prompt(body)
+    stream_requested = _is_gemini_stream_request(body) if stream is None else stream
+    return StandardRequest(
+        prompt=prompt,
+        response_model=model,
+        resolved_model=resolve_model(model),
+        surface="gemini",
+        requested_model=model,
+        content=prompt,
+        stream=stream_requested,
+    )
+
+
+def _gemini_chunk_payload(text: str) -> dict[str, Any]:
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": text}],
+                    "role": "model",
+                }
+            }
+        ]
+    }
+
+
+async def _load_and_validate_request(request: Request, model: str, *, force_stream: bool | None = None):
     app = request.app
     users_db = app.state.users_db
-    client: QwenClient = app.state.qwen_client
-    
-    token = request.query_params.get("key", "").strip() or request.query_params.get("api_key", "").strip()
-    
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else ""
-    if not token:
-        token = request.headers.get("x-api-key", "").strip()
+    client = app.state.qwen_client
 
-    from backend.core.config import API_KEYS, settings
-    admin_k = settings.ADMIN_KEY
+    auth = await resolve_auth_context(request, users_db)
+    token = auth.token
 
-    if API_KEYS:
-        if token != admin_k and token not in API_KEYS and not token:
-            raise HTTPException(status_code=401, detail="Invalid API Key")
-
-    users = await users_db.get()
-    user = next((u for u in users if u["id"] == token), None)
-    if user and user.get("quota", 0) <= user.get("used_tokens", 0):
-        raise HTTPException(status_code=402, detail="Quota Exceeded")
-        
     body = await request.json()
-    resolved_model = resolve_model(model)
-    contents = body.get("contents", [])
+    standard_request = _build_standard_request(model, body, stream=force_stream)
+    update_request_context(resolved_model=standard_request.resolved_model)
+    return users_db, client, token, standard_request
 
-    content = ""
-    for m in contents:
-        if m.get("role") == "user":
-            for part in m.get("parts", []):
-                content += part.get("text", "") + "\n"
 
-    log.info(f"[Gemini] model={resolved_model}, stream=True, prompt_len={len(content)}")
+@router.post("/v1beta/models/{model}:generateContent")
+@router.post("/v1/models/{model}:generateContent")
+@router.post("/models/{model}:generateContent")
+async def gemini_generate_content(model: str, request: Request):
+    with request_context(req_id=new_request_id(), surface="gemini", requested_model=model):
+        users_db, client, token, standard_request = await _load_and_validate_request(request, model, force_stream=False)
+        content = standard_request.prompt
+        log.info(f"[Gemini] route=generateContent model={standard_request.resolved_model}, stream={standard_request.stream}, prompt_len={len(content)}")
 
-    try:
-        events, chat_id, acc = await client.chat_stream_events_with_retry(resolved_model, content)
-    except Exception as e:
-        log.error(f"Gemini proxy failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-    async def generate():
-        full_text = ""
         try:
-            for evt in events:
-                if evt.get("type") == "delta":
-                    text = evt.get("content", "")
-                    full_text += text
-                    chunk = {
-                        "candidates": [
-                            {"content": {"parts": [{"text": text}], "role": "model"}}
-                        ]
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n"
+            execution = await collect_completion_run(client, standard_request, content)
+        except Exception as e:
+            log.error(f"Gemini proxy failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-            log.info(f"[Gemini] Request complete. Generated {len(full_text)} characters.")
-                    
-            usage = calculate_usage(content, full_text)
-            
-            users = await users_db.get()
-            for u in users:
-                if u["id"] == token:
-                    u["used_tokens"] += usage["total_tokens"]
+        usage = calculate_usage(content, execution.state.answer_text)
+        users = await users_db.get()
+        for u in users:
+            if u["id"] == token:
+                u["used_tokens"] += usage["total_tokens"]
+                break
+        await users_db.save(users)
+        await cleanup_runtime_resources(client, execution.acc, execution.chat_id)
+
+        log.info(f"[Gemini] Request complete. Generated {len(execution.state.answer_text)} characters.")
+        return JSONResponse(
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [{"text": execution.state.answer_text}],
+                            "role": "model",
+                        }
+                    }
+                ]
+            }
+        )
+
+
+@router.post("/v1beta/models/{model}:streamGenerateContent")
+@router.post("/v1/models/{model}:streamGenerateContent")
+@router.post("/models/{model}:streamGenerateContent")
+async def gemini_stream_generate_content(model: str, request: Request):
+    with request_context(req_id=new_request_id(), surface="gemini", requested_model=model):
+        users_db, client, token, standard_request = await _load_and_validate_request(request, model, force_stream=True)
+        content = standard_request.prompt
+        log.info(f"[Gemini] route=streamGenerateContent model={standard_request.resolved_model}, stream={standard_request.stream}, prompt_len={len(content)}")
+
+        async def generate():
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            async def on_delta(evt, text_chunk, _):
+                if text_chunk and evt.get("phase") == "answer":
+                    await queue.put(stream_presenter.gemini_text_chunk(text_chunk))
+
+            async def runner():
+                execution = None
+                try:
+                    execution = await collect_completion_run(
+                        client,
+                        standard_request,
+                        content,
+                        capture_events=False,
+                        on_delta=on_delta,
+                    )
+
+                    usage = calculate_usage(content, execution.state.answer_text)
+                    users = await users_db.get()
+                    for u in users:
+                        if u["id"] == token:
+                            u["used_tokens"] += usage["total_tokens"]
+                            break
+                    await users_db.save(users)
+                    await cleanup_runtime_resources(client, execution.acc, execution.chat_id)
+                    log.info(f"[Gemini] Request complete. Generated {len(execution.state.answer_text)} characters.")
+                except Exception as e:
+                    await queue.put(json.dumps({"error": str(e)}) + "\n")
+                finally:
+                    await queue.put(None)
+
+            task = asyncio.create_task(runner())
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
                     break
-            await users_db.save(users)
-            
-        finally:
-            client.account_pool.release(acc)
-            asyncio.create_task(client.delete_chat(acc.token, chat_id))
-            
-    return StreamingResponse(generate(), media_type="text/event-stream")
+                yield chunk
+            await task
+
+        return StreamingResponse(generate(), media_type=GEMINI_STREAM_MEDIA_TYPE)

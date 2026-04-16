@@ -46,7 +46,7 @@ def install_backend_deps():
 
 
 def fetch_browser():
-    print("⚡ [2/4] 检查 Camoufox 浏览器内核...")
+    print("⚡ [2/4] 检查注册功能所需的 Camoufox 浏览器内核...")
     env = os.environ.copy()
     env["PYTHONPATH"] = str(WORKSPACE_DIR)
     try:
@@ -59,7 +59,7 @@ def fetch_browser():
             return
     except Exception:
         pass
-    print("  -> 正在下载 Camoufox 内核（首次运行，请耐心等待）...")
+    print("  -> 正在下载 Camoufox 内核（仅注册/激活账号时会使用，请耐心等待）...")
     try:
         subprocess.check_call(
             [sys.executable, "-m", "camoufox", "fetch"],
@@ -134,6 +134,7 @@ def start_backend() -> subprocess.Popen:
     env["PYTHONUTF8"] = "1"
 
     port = env.get("PORT", "7860")
+    workers = env.get("WORKERS", "1")
     kill_port(int(port))
 
     proc = subprocess.Popen(
@@ -142,7 +143,7 @@ def start_backend() -> subprocess.Popen:
             "backend.main:app",
             "--host", "0.0.0.0",
             "--port", port,
-            "--workers", "1",
+            "--workers", workers,
         ],
         cwd=WORKSPACE_DIR,
         env=env,
@@ -150,7 +151,7 @@ def start_backend() -> subprocess.Popen:
         stderr=subprocess.STDOUT,
         bufsize=0,
     )
-    print(f"✓ 后端进程已启动 (PID: {proc.pid})，正在初始化浏览器引擎...")
+    print(f"✓ 后端进程已启动 (PID: {proc.pid})，正在等待服务完成初始化...")
 
     import threading
     ready_event = threading.Event()
@@ -162,7 +163,7 @@ def start_backend() -> subprocess.Popen:
             except Exception:
                 decoded = str(line)
             print(decoded, end="")
-            if "Browser engine started" in decoded or "Application startup complete" in decoded:
+            if "Application startup complete" in decoded or "服务已完全就绪" in decoded:
                 ready_event.set()
 
     threading.Thread(target=read_output, daemon=True).start()
@@ -181,8 +182,8 @@ def main():
     check_python()
     install_backend_deps()
     fetch_browser()
-    backend_proc = start_backend()   # 先等浏览器引擎完全就绪
-    frontend_proc = start_frontend() # 引擎好了再启前端
+    backend_proc = start_backend()
+    frontend_proc = start_frontend()
 
     port = os.environ.get("PORT", "7860")
     print()
@@ -211,10 +212,10 @@ def main():
     try:
         while True:
             if backend_proc.poll() is not None:
-                print(f"❌ 后端进程异常退出 (Exit Code: {backend_proc.returncode})")
+                print(f"❌ 后端进程异常退出 (退出码: {backend_proc.returncode})")
                 break
             if frontend_proc.poll() is not None:
-                print(f"❌ 前端进程异常退出 (Exit Code: {frontend_proc.returncode})")
+                print(f"❌ 前端进程异常退出 (退出码: {frontend_proc.returncode})")
                 break
             time.sleep(1)
     except KeyboardInterrupt:

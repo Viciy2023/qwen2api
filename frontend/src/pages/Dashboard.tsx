@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Server, Activity, ShieldAlert, ActivityIcon, FileJson, Cpu, Shield, Globe, ImageIcon } from "lucide-react"
+import { Server, Activity, ShieldAlert, ActivityIcon, FileJson, Cpu, Shield, Globe, ImageIcon, Paperclip } from "lucide-react"
 import { getAuthHeader } from "../lib/auth"
 import { API_BASE } from "../lib/api"
 import { toast } from "sonner"
@@ -117,6 +117,13 @@ export default function Dashboard() {
                 <div className="font-semibold text-foreground/80">POST /v1/images/generations</div>
               </div>
               <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-bold bg-purple-500/10 text-purple-600 dark:bg-purple-500/20 dark:text-purple-300 ring-1 ring-purple-500/20 dark:ring-purple-500/30">Image Gen</span>
+            </div>
+            <div className="flex justify-between items-center px-8 py-5 hover:bg-black/5 dark:hover:bg-white/[0.02] transition-colors">
+              <div className="flex items-center gap-4">
+                <div className="p-2 rounded-md bg-cyan-500/10"><Paperclip className="h-5 w-5 text-cyan-500 dark:text-cyan-400" /></div>
+                <div className="font-semibold text-foreground/80">POST /v1/files</div>
+              </div>
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-bold bg-cyan-500/10 text-cyan-600 dark:bg-cyan-500/20 dark:text-cyan-300 ring-1 ring-cyan-500/20 dark:ring-cyan-500/30">Files</span>
             </div>
             <div className="flex justify-between items-center px-8 py-5 hover:bg-black/5 dark:hover:bg-white/[0.02] transition-colors">
               <div className="flex items-center gap-4">

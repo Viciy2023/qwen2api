@@ -79,66 +79,87 @@ export default function SettingsPage() {
 
   const baseUrl = API_BASE || `http://${window.location.hostname}:7860`
 
-  const curlExample = `# OpenAI 流式对话
-curl ${baseUrl}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{
-    "model": "qwen3.6-plus",
-    "messages": [{"role": "user", "content": "你好"}],
-    "stream": true
-  }'
+  const curlExample = `# OpenAI streaming chat
+  curl ${baseUrl}/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -d '{
+      "model": "qwen3.6-plus",
+      "messages": [{"role": "user", "content": "Hello"}],
+      "stream": true
+    }'
 
-# Anthropic 格式（Claude Code / SDK）
-curl ${baseUrl}/anthropic/v1/messages \\
-  -H "Content-Type: application/json" \\
-  -H "x-api-key: YOUR_API_KEY" \\
-  -H "anthropic-version: 2023-06-01" \\
-  -d '{
-    "model": "claude-sonnet-4-6",
-    "max_tokens": 1024,
-    "messages": [{"role": "user", "content": "你好"}]
-  }'
+  # Upload one file first (the response contains a reusable content_block)
+  curl ${baseUrl}/v1/files \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -F "file=@./context.txt"
 
-# Gemini 格式
-curl ${baseUrl}/v1beta/models/qwen3.6-plus:generateContent \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{
-    "contents": [{"parts": [{"text": "你好"}]}]
-  }'
+  # OpenAI + attachment
+  curl ${baseUrl}/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -d '{
+      "model": "qwen3.6-plus",
+      "stream": false,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {"type": "text", "text": "Read the uploaded file and summarize the key points."},
+            {"type": "input_file", "file_id": "FILE_ID_FROM_UPLOAD", "filename": "context.txt", "mime_type": "text/plain"}
+          ]
+        }
+      ]
+    }'
 
-# 图片生成（标准 OpenAI Images 接口，推荐）
-curl ${baseUrl}/v1/images/generations \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{
-    "model": "dall-e-3",
-    "prompt": "一只赛博朋克风格的猫，霓虹灯背景，超写实",
-    "n": 1,
-    "size": "1024x1024",
-    "response_format": "url"
-  }'
+  # Anthropic / Claude Code + attachment
+  curl ${baseUrl}/anthropic/v1/messages \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: YOUR_API_KEY" \
+    -H "anthropic-version: 2023-06-01" \
+    -d '{
+      "model": "claude-sonnet-4-6",
+      "max_tokens": 1024,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {"type": "text", "text": "Read the uploaded file and summarize the key points."},
+            {"type": "input_file", "file_id": "FILE_ID_FROM_UPLOAD", "filename": "context.txt", "mime_type": "text/plain"}
+          ]
+        }
+      ]
+    }'
 
-# 图片生成（Chat 意图识别自动路由，返回内容中附带图片链接）
-curl ${baseUrl}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{
-    "model": "qwen3.6-plus",
-    "stream": false,
-    "messages": [{"role": "user", "content": "帮我生成一张星空下的雪山图片，写实风格"}]
-  }'
+  # Gemini
+  curl ${baseUrl}/v1beta/models/qwen3.6-plus:generateContent \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -d '{
+      "contents": [{"parts": [{"text": "Hello"}]}]
+    }'
 
-# 视频生成（仍为预留链路，先不要作为稳定能力依赖）
-curl ${baseUrl}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -d '{
-    "model": "qwen3.6-plus",
-    "stream": false,
-    "messages": [{"role": "user", "content": "生成视频：海浪拍打礁石，慢动作"}]
-  }'`
+  # Images
+  curl ${baseUrl}/v1/images/generations \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -d '{
+      "model": "dall-e-3",
+      "prompt": "A cyberpunk cat with neon lights, ultra realistic",
+      "n": 1,
+      "size": "1024x1024",
+      "response_format": "url"
+    }'
+
+  # Video (reserved path)
+  curl ${baseUrl}/v1/chat/completions \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer YOUR_API_KEY" \
+    -d '{
+      "model": "qwen3.6-plus",
+      "stream": false,
+      "messages": [{"role": "user", "content": "Generate a slow-motion ocean-wave video."}]
+    }'`
 
   return (
     <div className="space-y-6 max-w-4xl">

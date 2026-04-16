@@ -27,28 +27,31 @@ export default function TokensPage() {
     fetch(`${API_BASE}/api/admin/keys`, {
       method: "POST",
       headers: getAuthHeader()
-    }).then(res => {
+    }).then(async res => {
+      const data = await res.json().catch(() => ({}))
       if (res.ok) {
         toast.success("已生成新的 API Key")
+        if (data.key) copyToClipboard(data.key)
         fetchKeys()
       } else {
-        toast.error("生成失败，请检查权限")
+        toast.error(data.detail || "生成失败，请检查权限")
       }
-    })
+    }).catch(() => toast.error("生成失败，请检查权限"))
   }
 
   const handleDelete = (key: string) => {
     fetch(`${API_BASE}/api/admin/keys/${encodeURIComponent(key)}`, {
       method: "DELETE",
       headers: getAuthHeader()
-    }).then(res => {
+    }).then(async res => {
       if (res.ok) {
         toast.success("API Key 已删除")
         fetchKeys()
       } else {
-        toast.error("删除失败")
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.detail || "删除失败")
       }
-    })
+    }).catch(() => toast.error("删除失败"))
   }
 
   const copyToClipboard = (text: string) => {

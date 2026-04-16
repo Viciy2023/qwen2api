@@ -11,13 +11,14 @@ services:
     volumes:
       - ./data:/workspace/data
       - ./logs:/workspace/logs
-    shm_size: '256m'
+    shm_size: "256m"
     environment:
       PYTHONIOENCODING: utf-8
       PORT: "7860"
-      ENGINE_MODE: "hybrid"
+      WORKERS: "1"
+      LOG_LEVEL: "INFO"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7860/healthz"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:7860/healthz || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 120s
