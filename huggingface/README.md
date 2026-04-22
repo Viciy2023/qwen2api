@@ -10,4 +10,6 @@ license: mit
 
 # Qwen2Api
 
-This Space runs `qwen2API` from the official Docker image and stores runtime data in `/data`.
+This Space builds `qwen2API` from the upstream source repository and stores runtime data in `/data`.
+
+The Dockerfile also keeps an official image stage as a fallback path for future switching.
