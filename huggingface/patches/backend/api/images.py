@@ -8,11 +8,13 @@
 """
 
 import asyncio
+import base64
 import json
 import logging
 import re
 import time
 from collections.abc import Iterable
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -110,6 +112,12 @@ def _get_token(request: Request) -> str:
     return request.headers.get("x-api-key", "").strip()
 
 
+def _download_image_as_base64(url: str) -> str:
+    request = UrlRequest(url, method="GET")
+    with urlopen(request, timeout=120) as response:
+        return base64.b64encode(response.read()).decode("ascii")
+
+
 def _build_image_prompt(prompt: str) -> str:
     return (
         "请直接生成图片，不要只输出文字描述。"
@@ -149,6 +157,7 @@ async def create_image(request: Request):
 
     n: int = min(max(int(body.get("n", 1)), 1), 4)
     model = _resolve_image_model(body.get("model"))
+    response_format = str(body.get("response_format", "url") or "url").strip().lower()
 
     log.info(f"[T2I] model={model}, n={n}, prompt={prompt[:80]!r}")
 
@@ -188,7 +197,15 @@ async def create_image(request: Request):
             log.warning("[T2I] 未提取到图片 URL，chat 摘要: %s", _summarize_payload(current_chat))
             raise HTTPException(status_code=500, detail="Image generation succeeded but no URL found")
 
-        data = [{"url": url, "revised_prompt": prompt} for url in image_urls[:n]]
+        if response_format == "b64_json":
+            data = []
+            for url in image_urls[:n]:
+                data.append({
+                    "b64_json": _download_image_as_base64(url),
+                    "revised_prompt": prompt,
+                })
+        else:
+            data = [{"url": url, "revised_prompt": prompt} for url in image_urls[:n]]
         return JSONResponse({"created": int(time.time()), "data": data})
 
     except HTTPException:
