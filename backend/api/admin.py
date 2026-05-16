@@ -241,12 +241,15 @@ async def get_settings():
 
 @router.put("/settings", dependencies=[Depends(verify_admin)])
 async def update_settings(data: dict):
-    from backend.core.config import MODEL_MAP
+    from backend.core.config import MODEL_MAP, RUNTIME_CONFIG, save_runtime_config
     if "max_inflight_per_account" in data:
         settings.MAX_INFLIGHT_PER_ACCOUNT = data["max_inflight_per_account"]
+        RUNTIME_CONFIG["max_inflight_per_account"] = settings.MAX_INFLIGHT_PER_ACCOUNT
     if "model_aliases" in data:
         MODEL_MAP.clear()
         MODEL_MAP.update(data["model_aliases"])
+        RUNTIME_CONFIG["model_aliases"] = {k: v for k, v in MODEL_MAP.items()}
+    save_runtime_config(RUNTIME_CONFIG)
     return {"ok": True}
 
 @router.get("/keys", dependencies=[Depends(verify_admin)])

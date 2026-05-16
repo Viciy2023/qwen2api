@@ -5,7 +5,8 @@ from pydantic_settings import BaseSettings
 from typing import Dict, Set
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+DEFAULT_DATA_DIR = BASE_DIR / "data"
+DATA_DIR = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR)))
 
 class Settings(BaseSettings):
     # 服务配置
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     USERS_FILE: str = os.getenv("USERS_FILE", str(DATA_DIR / "users.json"))
     CAPTURES_FILE: str = os.getenv("CAPTURES_FILE", str(DATA_DIR / "captures.json"))
     CONFIG_FILE: str = os.getenv("CONFIG_FILE", str(DATA_DIR / "config.json"))
+    API_KEYS_FILE: str = os.getenv("API_KEYS_FILE", str(DATA_DIR / "api_keys.json"))
 
     # ????? / ????
     CONTEXT_INLINE_MAX_CHARS: int = int(os.getenv("CONTEXT_INLINE_MAX_CHARS", 4000))
@@ -51,29 +53,52 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
-API_KEYS_FILE = DATA_DIR / "api_keys.json"
+settings = Settings()
+
+API_KEYS_FILE = Path(settings.API_KEYS_FILE)
+
+def load_env_api_keys() -> set:
+    raw = os.getenv("API_KEYS", "")
+    return {key.strip() for key in raw.split(",") if key.strip()}
 
 def load_api_keys() -> set:
+    keys = load_env_api_keys()
     if API_KEYS_FILE.exists():
         try:
             with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return set(data.get("keys", []))
+                keys.update(data.get("keys", []))
         except Exception:
             pass
-    return set()
+    return keys
 
 def save_api_keys(keys: set):
     API_KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(API_KEYS_FILE, "w", encoding="utf-8") as f:
         json.dump({"keys": list(keys)}, f, indent=2)
 
+def load_runtime_config() -> dict:
+    path = Path(settings.CONFIG_FILE)
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+    return {}
+
+def save_runtime_config(data: dict):
+    path = Path(settings.CONFIG_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 # 在内存中存储管理的 API Keys
 API_KEYS = load_api_keys()
+RUNTIME_CONFIG = load_runtime_config()
 
 VERSION = "2.0.0"
-
-settings = Settings()
 
 # 全局映射
 MODEL_MAP = {
@@ -109,6 +134,13 @@ MODEL_MAP = {
     "deepseek-chat":     "qwen3.6-plus",
     "deepseek-reasoner": "qwen3.6-plus",
 }
+
+if isinstance(RUNTIME_CONFIG.get("model_aliases"), dict):
+    MODEL_MAP.clear()
+    MODEL_MAP.update(RUNTIME_CONFIG["model_aliases"])
+
+if isinstance(RUNTIME_CONFIG.get("max_inflight_per_account"), int):
+    settings.MAX_INFLIGHT_PER_ACCOUNT = RUNTIME_CONFIG["max_inflight_per_account"]
 
 def resolve_model(name: str) -> str:
     return MODEL_MAP.get(name, name)
