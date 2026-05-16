@@ -29,6 +29,11 @@ class User(BaseModel):
     quota: int
     used_tokens: int
 
+class TokenUpdate(BaseModel):
+    token: str
+    cookies: str | None = None
+    username: str | None = None
+
 @router.get("/status", dependencies=[Depends(verify_admin)])
 async def get_system_status(request: Request):
     pool = request.app.state.account_pool
@@ -41,8 +46,8 @@ async def get_system_status(request: Request):
             "description": "普通请求直连 HTTP，不经过浏览器",
         },
         "browser_automation": {
-            "mode": "on_demand_registration_only",
-            "description": "仅注册/激活/刷新 Token 时按需启动真实浏览器",
+            "mode": "disabled" if settings.DISABLE_BROWSER_AUTOMATION else "external_refresh_recommended",
+            "description": "HF 环境建议禁用浏览器自动化，由外部刷新器写回 token" if settings.DISABLE_BROWSER_AUTOMATION else "本机可按需启动浏览器；HF 环境请使用外部刷新器",
         }
     }
 
@@ -117,6 +122,9 @@ async def list_accounts(request: Request):
 @router.post("/accounts/register", dependencies=[Depends(verify_admin)])
 async def register_new_account(request: Request):
     """一键调用浏览器无头注册新千问账号"""
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        return {"ok": False, "error": "浏览器自动化已禁用，请手动添加 token 或使用外部刷新器"}
+
     import logging
     from backend.services.auth_resolver import register_qwen_account
     from backend.core.account_pool import AccountPool
@@ -156,12 +164,14 @@ async def verify_all_accounts(request: Request):
     results = []
     for acc in pool.accounts:
         is_valid = await client.verify_token(acc.token)
-        if not is_valid and acc.password:
+        refreshed = False
+        if not is_valid and acc.password and settings.ALLOW_BACKGROUND_TOKEN_REFRESH:
             log.info(f"[校验] {acc.email} token失效，尝试自动刷新...")
             is_valid = await client.auth_resolver.refresh_token(acc)
+            refreshed = is_valid
 
         acc.valid = is_valid
-        results.append({"email": acc.email, "valid": is_valid, "refreshed": not is_valid})
+        results.append({"email": acc.email, "valid": is_valid, "refreshed": refreshed})
 
     await pool.save() # 直接保存全部状态，不调用 mark_invalid 以免熔断影响测试
     return {"ok": True, "results": results}
@@ -169,6 +179,9 @@ async def verify_all_accounts(request: Request):
 @router.post("/accounts/{email}/activate", dependencies=[Depends(verify_admin)])
 async def activate_account(email: str, request: Request):
     """单独激活某个账号"""
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        return {"ok": False, "error": "浏览器自动化已禁用，请在外部刷新器完成激活/刷新后写回 token"}
+
     from backend.services.auth_resolver import activate_account as activate_logic
     from backend.core.account_pool import AccountPool
 
@@ -209,14 +222,43 @@ async def verify_account(email: str, request: Request):
         raise HTTPException(status_code=404, detail="Account not found")
 
     is_valid = await client.verify_token(acc.token)
-    if not is_valid and acc.password:
+    refreshed = False
+    if not is_valid and acc.password and settings.ALLOW_BACKGROUND_TOKEN_REFRESH:
         log.info(f"[校验] {acc.email} token失效，尝试自动刷新...")
         is_valid = await client.auth_resolver.refresh_token(acc)
+        refreshed = is_valid
 
     acc.valid = is_valid
     await pool.save() # 直接保存，不调用 mark_invalid 以免熔断影响正常测试
 
-    return {"email": acc.email, "valid": is_valid}
+    return {"email": acc.email, "valid": is_valid, "refreshed": refreshed}
+
+@router.put("/accounts/{email}/token", dependencies=[Depends(verify_admin)])
+async def update_account_token(email: str, payload: TokenUpdate, request: Request):
+    token = payload.token.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+
+    pool: AccountPool = request.app.state.account_pool
+    acc = pool.get_by_email(email)
+    if not acc:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    acc.token = token
+    acc.valid = True
+    acc.activation_pending = False
+    acc.status_code = "valid"
+    acc.last_error = ""
+    acc.consecutive_failures = 0
+    acc.rate_limit_strikes = 0
+    acc.rate_limited_until = 0.0
+    if payload.cookies is not None:
+        acc.cookies = payload.cookies
+    if payload.username is not None:
+        acc.username = payload.username
+
+    await pool.add(acc)
+    return {"ok": True, "email": acc.email, "valid": acc.valid}
 
 @router.delete("/accounts/{email}", dependencies=[Depends(verify_admin)])
 async def delete_account(email: str, request: Request):

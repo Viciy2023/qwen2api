@@ -32,6 +32,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/workspace \
     PORT=7860 \
     WORKERS=1 \
+    DISABLE_BROWSER_AUTOMATION=1 \
+    ALLOW_BACKGROUND_TOKEN_REFRESH=0 \
     ENGINE_MODE=hybrid \
     BROWSER_POOL_SIZE=1 \
     MAX_INFLIGHT=1 \
@@ -79,7 +81,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=source_fetch /src/qwen2api/backend/requirements.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt && pip install --no-cache-dir h2
-RUN python -m camoufox fetch
 
 COPY --from=source_fetch /src/qwen2api/backend ./backend
 COPY --from=source_fetch /src/qwen2api/start.py ./start.py

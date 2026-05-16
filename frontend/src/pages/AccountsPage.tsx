@@ -188,9 +188,9 @@ export default function AccountsPage() {
     }).then(res => res.json())
       .then(data => {
         if (data.valid) {
-          toast.success(`\u9a8c\u8bc1\u901a\u8fc7\uff1a${targetEmail}`, { id })
+          toast.success(data.refreshed ? `\u5df2\u5237\u65b0\u5e76\u9a8c\u8bc1\u901a\u8fc7\uff1a${targetEmail}` : `\u9a8c\u8bc1\u901a\u8fc7\uff1a${targetEmail}`, { id })
         } else {
-          toast.error(`\u9a8c\u8bc1\u5931\u8d25\uff1a${statusText(data) || localizeError(data.error)}`, { id, duration: 8000 })
+          toast.error(`\u9a8c\u8bc1\u5931\u8d25\uff1a${statusText(data) || localizeError(data.error)}\uff1bHF \u5185\u90e8\u4e0d\u81ea\u52a8\u542f\u52a8\u6d4f\u89c8\u5668\u5237\u65b0\uff0c\u8bf7\u7528\u5916\u90e8\u5237\u65b0\u5668\u5199\u56de Token`, { id, duration: 8000 })
         }
         fetchAccounts()
       })

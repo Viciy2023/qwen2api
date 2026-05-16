@@ -1,6 +1,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from backend.core.config import settings
 
 _CAMOUFOX_OPTS = {
     "headless": True,
@@ -19,6 +20,9 @@ _CAMOUFOX_OPTS = {
 
 @asynccontextmanager
 async def _new_browser():
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        raise RuntimeError("Browser automation is disabled in this deployment")
+
     from camoufox.async_api import AsyncCamoufox
 
     async with AsyncCamoufox(**_CAMOUFOX_OPTS) as browser:
@@ -26,6 +30,9 @@ async def _new_browser():
 
 
 async def ensure_browser_installed():
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        return
+
     import subprocess
     import sys
 

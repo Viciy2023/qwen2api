@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     BROWSER_POOL_SIZE: int = int(os.getenv("BROWSER_POOL_SIZE", 2))
     MAX_INFLIGHT_PER_ACCOUNT: int = int(os.getenv("MAX_INFLIGHT", 1))
     BROWSER_STREAM_TIMEOUT_SECONDS: int = int(os.getenv("BROWSER_STREAM_TIMEOUT_SECONDS", 1800))
+    DISABLE_BROWSER_AUTOMATION: bool = os.getenv("DISABLE_BROWSER_AUTOMATION", "0").lower() in {"1", "true", "yes", "on"}
+    ALLOW_BACKGROUND_TOKEN_REFRESH: bool = os.getenv("ALLOW_BACKGROUND_TOKEN_REFRESH", "0").lower() in {"1", "true", "yes", "on"}
 
     # 容灾与限流
     MAX_RETRIES: int = 3

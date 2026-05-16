@@ -404,6 +404,10 @@ class _AsyncMailClient:
         return await asyncio.to_thread(self._sess.poll_verify_link, email, timeout_sec)
 
 async def register_qwen_account() -> Optional[Account]:
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        log.warning("[注册] 浏览器自动化已禁用，跳过自动注册")
+        return None
+
     log.info("[Register] ── 开始注册流程 ──")
     async with _AsyncMailClient() as mail_client:
         log.info("[Register] [1/7] 生成临时邮箱...")
@@ -658,6 +662,10 @@ async def _login_and_get_token(page, email: str, password: str, timeout_sec: int
     return ""
 
 async def activate_account(acc: Account) -> bool:
+    if settings.DISABLE_BROWSER_AUTOMATION:
+        log.warning(f"[Activate] 浏览器自动化已禁用，跳过账号激活: {acc.email}")
+        return False
+
     """Use inbox API first, then mailbox-page fallback, to activate an account."""
     started_at = float(getattr(acc, "_activation_started_at", 0) or 0)
     if getattr(acc, "_is_activating", False):
@@ -772,6 +780,10 @@ class AuthResolver:
     async def refresh_token(self, acc: Account) -> bool:
 
         """Re-login with email+password to get a fresh token. Returns True on success."""
+        if settings.DISABLE_BROWSER_AUTOMATION:
+            log.warning(f"[Refresh] 浏览器自动化已禁用，跳过 token 刷新: {acc.email}")
+            return False
+
         if not acc.email or not acc.password:
             log.warning(f"[Refresh] 账号 {acc.email} 无密码，无法刷新")
             return False
